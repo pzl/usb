@@ -28,6 +28,7 @@ func (b backingUsbfs) getPort(d Device) (int, error) {
 
 }
 func (b backingUsbfs) getActiveConfig(d Device) (int, error) {
+	// https://github.com/libusb/libusb/blob/93dcb8ed205a4e4cea105c2141fbbbdeac84bb66/libusb/os/linux_usbfs.c#L924
 	return 0, ErrNotImplemented
 
 }
