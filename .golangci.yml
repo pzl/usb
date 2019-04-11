@@ -1,0 +1,20 @@
+run:
+
+  modules-download-mode: vendor
+
+linters:
+  enable:
+    - dupl
+    - goconst
+    - gocyclo
+    - gosec
+    - interfacer
+    - misspell
+    - prealloc
+    - scopelint
+    - unconvert
+    - unparam
+
+linters-settings:
+    errcheck:
+        ignore: fmt:.*,io/ioutil:^Read.*,Walk.*

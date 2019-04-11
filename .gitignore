@@ -1,0 +1,5 @@
+*.sw[op]
+*.h
+*.bin
+vendor/
+ref/
