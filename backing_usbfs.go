@@ -63,4 +63,7 @@ func (b backingUsbfs) setConfiguration(d Device, cfg int) error {
 	return ErrNotImplemented
 }
 
+func (b backingUsbfs) claim(i Interface) error   { return gusb.Claim(i.d.f, int32(i.ID)) }   // ioctl
+func (b backingUsbfs) release(i Interface) error { return gusb.Release(i.d.f, int32(i.ID)) } // ioctl
+
 /* Not universal funcs */

@@ -65,6 +65,41 @@ func (b backingSysfs) setConfiguration(d Device, cfg int) error {
 	return ErrNotImplemented
 }
 
+// write interface basename to SYSFS_PATH/drivers/DRIVERNAME/unbind
+// write interface basename to SYSFS_PATH/drivers/usbfs/bind
+func (b backingSysfs) claim(i Interface) error {
+	// look for bound driver file
+	devPath := fmt.Sprintf("%s:%d.%d", i.d.sysPath, i.d.ActiveConfig.Value, i.ID)
+	_, err := os.Stat(filepath.Join(devPath, "driver"))
+	if err != nil && !os.IsNotExist(err) {
+		log.WithField("device", devPath).WithError(err).Error("could not get driver information for device")
+		return err
+	}
+
+	// unbind if driver is present
+	// @todo: HID does not like to be unbound this way.
+	// see: https://unix.stackexchange.com/questions/12005/how-to-use-linux-kernel-driver-bind-unbind-interface-for-usb-hid-devices
+	if !os.IsNotExist(err) {
+		log.WithField("device", devPath).Debug("device has bound driver")
+		unbind := filepath.Join(devPath, "driver", "unbind")
+		if err := ioutil.WriteFile(unbind, []byte(filepath.Base(devPath)), 0200); err != nil {
+			return fmt.Errorf("error unbinding driver: %v", err)
+		}
+	} else {
+		log.WithField("device", devPath).Debug("no current driver found, nothing to unbind")
+	}
+	// and bind to usbfs
+	return ioutil.WriteFile("/sys/bus/usb/drivers/usbfs/bind", []byte(filepath.Base(devPath)), 0200)
+}
+
+func (b backingSysfs) release(i Interface) error {
+	//@todo
+	//	write interface basename to SYSFS_PATH/drivers/usbfs/unbind
+	//	... not sure we can tell kernel to rebind to the appropriate driver by ourself? perhaps the uevent file?
+	//      perhaps SYSFS/drivers/usb/bind !
+	return ErrNotImplemented
+}
+
 /* Not universal funcs */
 
 func (b backingSysfs) getBusNum(d Device) (int, error) {

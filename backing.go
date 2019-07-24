@@ -17,4 +17,6 @@ type dataBacking interface {
 	// dynamic calls
 	getDriver(d Device, intf int) (string, error)
 	setConfiguration(Device, int) error
+	claim(i Interface) error
+	release(i Interface) error
 }

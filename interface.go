@@ -1,9 +1,5 @@
 package usb
 
-import (
-	"github.com/pzl/usb/gusb"
-)
-
 type Interface struct {
 	ID        int // interface number
 	Alternate int
@@ -14,24 +10,10 @@ type Interface struct {
 }
 
 // Kernel interface release handled automatically
-func (i *Interface) Claim() error {
-	//SYSFS method: @todo
-	//	write interface basename to SYSFS_PATH/drivers/DRIVERNAME/unbind
-	//	write interface basename to SYSFS_PATH/drivers/usbfs/bind
-
-	// USBFS method - IOCTL
-	return gusb.Claim(i.d.f, int32(i.ID))
-}
+func (i *Interface) Claim() error { return backingUsbfs{}.claim(*i) }
 
 // Kernel interface re-claim handled automatically
-func (i *Interface) Release() error {
-	//SYSFS method: @todo
-	//	write interface basename to SYSFS_PATH/drivers/usbfs/unbind
-	//	... not sure we can tell kernel to rebind to the appropriate driver by ourself? perhaps the uevent file?
-
-	// USBFS method - IOCTL
-	return gusb.Release(i.d.f, int32(i.ID))
-}
+func (i *Interface) Release() error { return backingUsbfs{}.release(*i) }
 
 func (i *Interface) SetAlt() error {
 	return nil //@todo
