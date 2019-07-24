@@ -2,7 +2,6 @@ package gusb
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -166,10 +165,9 @@ func ParseDescriptor(r io.Reader) (DeviceDescriptor, error) {
 			} else if n != int(length) || length < 2 {
 				return dev, errors.New("short read")
 			} else {
-				h := &DescHeader{}
-				err = binary.Read(bytes.NewReader(body[:2]), binary.LittleEndian, h)
-				if err != nil {
-					return dev, err
+				h := DescHeader{
+					Length:     body[0],
+					Descriptor: DT(body[1]),
 				}
 				switch h.Descriptor {
 				case DTDevice:

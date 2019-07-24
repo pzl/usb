@@ -5,8 +5,8 @@ package gusb
 //  -/usr/include/linux/usb/ch9.h
 
 import (
-	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strconv"
 )
@@ -250,14 +250,6 @@ func (dc DescClasses) String() string {
 
 // USB_DT_DEVICE, aka DTDevice. (struct usb_device_descriptor)
 type DeviceDescriptor struct {
-	DeviceFieldsDesc
-	Configs   []ConfigDescriptor
-	extradata []byte // @todo: parse and fill
-
-	// internal use, not part of Descriptor spec
-	PathInfo DevicePath
-}
-type DeviceFieldsDesc struct {
 	DescHeader
 	USBVer        USBVer // bcdUSB, uint16
 	DescClasses          // 3 * uint8. Class, Subclass, Protocol
@@ -269,18 +261,40 @@ type DeviceFieldsDesc struct {
 	ProductStr    uint8  // iProduct
 	SerialStr     uint8  // iSerial
 	NumConfigs    uint8  // bNumConfigurations
+
+	Configs   []ConfigDescriptor
+	extradata []byte // @todo: parse and fill
+
+	// internal use, not part of Descriptor spec
+	PathInfo DevicePath
 }
 
 func NewDevice(b []byte) (DeviceDescriptor, error) {
 	const DFSize = 18
-	fields := &DeviceFieldsDesc{}
-	err := readDescFields(b, DFSize, fields)
-	if err != nil {
-		return DeviceDescriptor{}, err
+	if len(b) < DFSize {
+		return DeviceDescriptor{}, errors.New("not enough bytes to construct device descriptor")
 	}
+
 	dev := DeviceDescriptor{
-		DeviceFieldsDesc: *fields,
-		Configs:          make([]ConfigDescriptor, fields.NumConfigs),
+		DescHeader: DescHeader{
+			Length:     b[0],
+			Descriptor: DT(b[1]),
+		},
+		USBVer: USBVer(binary.LittleEndian.Uint16(b[2:])),
+		DescClasses: DescClasses{
+			Class:    USBClass(b[4]),
+			SubClass: USBSubClass(b[5]),
+			Protocol: USBProtocolDesc(b[6]),
+		},
+		MaxPacketSize: b[7],
+		Vendor:        USBID(binary.LittleEndian.Uint16(b[8:])),
+		Product:       USBID(binary.LittleEndian.Uint16(b[10:])),
+		Version:       USBVer(binary.LittleEndian.Uint16(b[12:])),
+		ManufStr:      b[14],
+		ProductStr:    b[15],
+		SerialStr:     b[16],
+		NumConfigs:    b[17],
+		Configs:       make([]ConfigDescriptor, b[17]),
 	}
 	if len(b) > DFSize {
 		dev.extradata = b[DFSize:]
@@ -304,13 +318,15 @@ type StringDescriptor struct {
 }
 
 func NewString(b []byte) (StringDescriptor, error) {
-	h := &DescHeader{}
-	if err := binary.Read(bytes.NewReader(b[:2]), binary.LittleEndian, h); err != nil {
-		return StringDescriptor{}, err
+	if len(b) < 2 {
+		return StringDescriptor{}, errors.New("not enough bytes to create String Descriptor")
 	}
 	return StringDescriptor{
-		DescHeader: *h,
-		S:          string(b[2:]),
+		DescHeader: DescHeader{
+			Length:     b[0],
+			Descriptor: DT(b[1]),
+		},
+		S: string(b[2:]),
 	}, nil
 }
 func (s StringDescriptor) String() string { return s.S }
@@ -322,21 +338,16 @@ func (s StringDescriptor) String() string { return s.S }
 //  struct usb_endpoint_descriptor
 // bDescriptorType: C: USB_DT_ENDPOINT, Go: DescEndpoint
 type EndpointDescriptor struct { // leftovers & interpreted
-	EndpointFieldsDesc
-	TransferType TransferType
-	ISOSyncType  ISOSyncType
-	ISOSyncMode  ISOSyncMode
-	extradata    []byte
-}
-
-//@todo: bRefresh && bSynchAddress provided via audio endpoints. See ch9.h, line 410
-
-type EndpointFieldsDesc struct { // readable directly from file
+	//@todo: bRefresh && bSynchAddress provided via audio endpoints. See ch9.h, line 410
 	DescHeader
 	Address       EndpointAddress //uint8
 	Attributes    uint8
 	MaxPacketSize uint16
 	Interval      uint8
+	TransferType  TransferType // parsed from Attributes
+	ISOSyncType   ISOSyncType  // parsed from Attributes
+	ISOSyncMode   ISOSyncMode  // parsed from Attributes
+	extradata     []byte
 }
 
 func NewEndpoint(b []byte) (EndpointDescriptor, error) {
@@ -346,21 +357,25 @@ func NewEndpoint(b []byte) (EndpointDescriptor, error) {
 		ISOSyncMask      = 0x3 << 2 // Attributes->IsoSyncType
 		ISOModeMask      = 0x3 << 4 // Attributes->IsoSyncMode
 	)
-	ef := &EndpointFieldsDesc{}
-	err := readDescFields(b, EFSize, ef)
-	if err != nil {
-		return EndpointDescriptor{}, err
+	if len(b) < EFSize {
+		return EndpointDescriptor{}, errors.New("not enough bytes to create Endpoint Descriptor")
 	}
 	e := EndpointDescriptor{
-		EndpointFieldsDesc: *ef,
-		TransferType:       TransferType(ef.Attributes & EndpointTypeMask),
+		DescHeader: DescHeader{
+			Length:     b[0],
+			Descriptor: DT(b[1]),
+		},
+		Address:       EndpointAddress(b[2]),
+		Attributes:    b[3],
+		MaxPacketSize: binary.LittleEndian.Uint16(b[4:]),
+		Interval:      b[6],
+		TransferType:  TransferType(b[3] & EndpointTypeMask),
 	}
 
 	if e.TransferType == EndpointTypeIsochronous {
-		e.ISOSyncType = ISOSyncType(ef.Attributes & ISOSyncMask)
-		e.ISOSyncMode = ISOSyncMode(ef.Attributes & ISOModeMask)
+		e.ISOSyncType = ISOSyncType(e.Attributes & ISOSyncMask)
+		e.ISOSyncMode = ISOSyncMode(e.Attributes & ISOModeMask)
 	}
-
 	if len(b) > EFSize {
 		e.extradata = b[EFSize:]
 	}
@@ -429,29 +444,36 @@ const (
 
 // struct usb_interface_descriptor
 type InterfaceDescriptor struct {
-	InterfaceFieldsDesc
-	Endpoints []EndpointDescriptor
-	extradata []byte
-}
-type InterfaceFieldsDesc struct {
 	DescHeader
 	InterfaceNumber  uint8
 	AlternateSetting uint8
 	NumEndpoints     uint8
 	DescClasses      // 3 * uint8. Class,Subclass,Protocol
 	StrIndex         uint8
+	Endpoints        []EndpointDescriptor
+	extradata        []byte
 }
 
 func NewInterface(b []byte) (InterfaceDescriptor, error) {
 	const IFSize = 9
-	fields := &InterfaceFieldsDesc{}
-	err := readDescFields(b, IFSize, fields)
-	if err != nil {
-		return InterfaceDescriptor{}, err
+	if len(b) < IFSize {
+		return InterfaceDescriptor{}, errors.New("not enough bytes to create Interface Descriptor")
 	}
 	interf := InterfaceDescriptor{
-		InterfaceFieldsDesc: *fields,
-		Endpoints:           make([]EndpointDescriptor, fields.NumEndpoints),
+		DescHeader: DescHeader{
+			Length:     b[0],
+			Descriptor: DT(b[1]),
+		},
+		InterfaceNumber:  b[2],
+		AlternateSetting: b[3],
+		NumEndpoints:     b[4],
+		DescClasses: DescClasses{
+			Class:    USBClass(b[5]),
+			SubClass: USBSubClass(b[6]),
+			Protocol: USBProtocolDesc(b[7]),
+		},
+		StrIndex:  b[8],
+		Endpoints: make([]EndpointDescriptor, b[4]),
 	}
 	if len(b) > IFSize {
 		interf.extradata = b[IFSize:]
@@ -471,21 +493,18 @@ const mAXCONFIGS = 8
 
 // struct usb_config_descriptor
 type ConfigDescriptor struct {
-	ConfigFieldsDesc
-	SelfPowered    bool // Attributes https://www.beyondlogic.org/usbnutshell/usb5.shtml#ConfigurationDescriptors
-	RemoteWakeup   bool // Attributes
-	BatteryPowered bool // Attributes (ch9.h)
+	DescHeader
+	TotalLength    uint16 // wTotalLength
+	NumInterfaces  uint8  // bNumInterfaces
+	Value          uint8  // bConfigurationValue
+	StrIndex       uint8  // iConfiguration
+	Attributes     uint8  // bmAttributes
+	MaxPower       uint8  // MaxPower
+	SelfPowered    bool   // Attributes https://www.beyondlogic.org/usbnutshell/usb5.shtml#ConfigurationDescriptors
+	RemoteWakeup   bool   // Attributes
+	BatteryPowered bool   // Attributes (ch9.h)
 	Interfaces     []InterfaceDescriptor
 	extradata      []byte
-}
-type ConfigFieldsDesc struct {
-	DescHeader
-	TotalLength   uint16 // wTotalLength
-	NumInterfaces uint8  // bNumInterfaces
-	Value         uint8  // bConfigurationValue
-	StrIndex      uint8  // iConfiguration
-	Attributes    uint8  // bmAttributes
-	MaxPower      uint8  // MaxPower
 }
 
 func NewConfig(b []byte) (ConfigDescriptor, error) {
@@ -495,17 +514,25 @@ func NewConfig(b []byte) (ConfigDescriptor, error) {
 		WakeupMask    = (1 << 5)
 		SelfPowerMask = (1 << 6)
 	)
-	fields := &ConfigFieldsDesc{}
-	err := readDescFields(b, CFSize, fields)
-	if err != nil {
-		return ConfigDescriptor{}, err
+	if len(b) < CFSize {
+		return ConfigDescriptor{}, errors.New("not enough bytes to create Config Descriptor")
 	}
+
 	config := ConfigDescriptor{
-		ConfigFieldsDesc: *fields,
-		Interfaces:       make([]InterfaceDescriptor, fields.NumInterfaces),
-		RemoteWakeup:     fields.Attributes&WakeupMask != 0,
-		SelfPowered:      fields.Attributes&SelfPowerMask != 0,
-		BatteryPowered:   fields.Attributes&BattPowerMask != 0,
+		DescHeader: DescHeader{
+			Length:     b[0],
+			Descriptor: DT(b[1]),
+		},
+		TotalLength:    binary.LittleEndian.Uint16(b[2:]),
+		NumInterfaces:  b[4],
+		Value:          b[5],
+		StrIndex:       b[6],
+		Attributes:     b[7],
+		MaxPower:       b[8],
+		Interfaces:     make([]InterfaceDescriptor, b[4]),
+		RemoteWakeup:   b[7]&WakeupMask != 0,
+		SelfPowered:    b[7]&SelfPowerMask != 0,
+		BatteryPowered: b[7]&BattPowerMask != 0,
 	}
 	if len(b) > CFSize {
 		config.extradata = b[CFSize:]
@@ -529,9 +556,24 @@ type DevQualifierDescriptor struct {
 
 func NewDevQualifier(b []byte) (DevQualifierDescriptor, error) {
 	const DQSize = 10
-	dq := DevQualifierDescriptor{}
-	err := readDescFields(b, DQSize, &dq)
-	return dq, err
+	if len(b) < DQSize {
+		return DevQualifierDescriptor{}, errors.New("not enough bytes to create Device Qualifier Descriptor")
+	}
+	return DevQualifierDescriptor{
+		DescHeader: DescHeader{
+			Length:     b[0],
+			Descriptor: DT(b[1]),
+		},
+		Version: USBVer(binary.LittleEndian.Uint16(b[2:])),
+		DescClasses: DescClasses{
+			Class:    USBClass(b[4]),
+			SubClass: USBSubClass(b[5]),
+			Protocol: USBProtocolDesc(b[6]),
+		},
+		MaxPacketSize: b[7],
+		NumConfigs:    b[8],
+		Reserved:      b[9],
+	}, nil
 }
 
 //@todo: Define the SSEPComp & SSPISOC structs for completeness. ch9.h:670
@@ -548,13 +590,4 @@ type USBID uint16
 
 func (id USBID) String() string {
 	return fmt.Sprintf("%04x", uint16(id))
-}
-
-// helpers
-
-func readDescFields(b []byte, size int, obj interface{}) error {
-	if err := binary.Read(bytes.NewReader(b[:size]), binary.LittleEndian, obj); err != nil {
-		return err
-	}
-	return nil
 }
