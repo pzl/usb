@@ -35,6 +35,41 @@ below includes a direct mapping of Libusb functions to `usb` concepts.
 | [`libusb_bos_type`](http://libusb.sourceforge.net/api-1.0/group__libusb__dev.html#ga6ccabbf3b3728ae69608ba83bba4e64c) | - ||
 
 
+#### [Details](http://libusb.sourceforge.net/api-1.0/group__libusb__dev.html#details)
+
+This is the equivalent pattern for enumerating devices, choosing your device, and opening it
+
+```go
+var found *usb.Device
+
+devs, err := usb.List()
+if err != nil {
+    panic(err)
+}
+
+for _, d := range devs {
+    if isMyDevice(d) {
+        found = d
+        break
+    }
+}
+
+if found == nil {
+    panic("device not found")
+}
+
+err = found.Open()
+if err != nil {
+    panic(err)
+}
+defer found.Close()
+```
+
+
+The concept of needing a handle separately from a device object is not carried over to this library. The device is the object from which you may obtain descriptor data, and it is the device you use for I/O operations.
+
+Similarly, the list obtained from `usb.List()` does not need to be freed. And devices are not reference counted.
+
 
 ## [Descriptors](http://libusb.sourceforge.net/api-1.0/group__libusb__desc.html)
 
@@ -42,7 +77,23 @@ These are implemented in the `gusb` subpackage
 
 | Libusb | `gusb` equiv | Done? |
 |--------|--------------|-------|
-
+| [`libusb_device_descriptor`][device-descr] | `gusb.DeviceDescriptor` | |
+| [`libusb_endpoint_descriptor`][ep-descr] | `gusb.EndpointDescriptor` | |
+| [`libusb_interface_descriptor`][intf-descr] | `gusb.InterfaceDescriptor` | |
+| [`libusb_interface`]() |  | |
+| [`libusb_config_descriptor`][cfg-descr] | `gusb.ConfigDescriptor` | |
+| [`libusb_ss_endpoint_companion_descriptor`]() |  | |
+| [`libusb_bos_dev_capability_descriptor`]() |  | |
+| [`libusb_bos_descriptor`]() |  | |
+| [`libusb_2_0_extension_descriptor`]() |  | |
+| [`libusb_ss_usb_device_capability_descriptor`]() | | |
+| [`libusb_container_id_descriptor`]() | | |
+| [`libusb_class_code`]() | `gusb.USBClass` | |
+| [`libusb_descriptor_type`]() | `gusb.DT` | |
+| [`libusb_endpoint_direction`]() | `gusb.EndpointDirection` | |
+| [`libusb_transfer_type`]() | `gusb.TransferType` | |
+| [`libusb_iso_sync_type`]() | `gusb.ISOSyncType` | |
+| [`libusb_iso_usage_type`]() | `gusb.ISOSyncMode` | |
 
 ## [Hotplug](http://libusb.sourceforge.net/api-1.0/group__libusb__hotplug.html)
 
