@@ -323,7 +323,9 @@ func (s StringDescriptor) String() string { return s.S }
 // bDescriptorType: C: USB_DT_ENDPOINT, Go: DescEndpoint
 type EndpointDescriptor struct { // leftovers & interpreted
 	EndpointFieldsDesc
-	TransferType EndpointType
+	TransferType TransferType
+	ISOSyncType  ISOSyncType
+	ISOSyncMode  ISOSyncMode
 	extradata    []byte
 }
 
@@ -340,7 +342,9 @@ type EndpointFieldsDesc struct { // readable directly from file
 func NewEndpoint(b []byte) (EndpointDescriptor, error) {
 	const (
 		EFSize           = 7
-		EndpointTypeMask = 0x03 // Attributes->TransferType
+		EndpointTypeMask = 0x3      // Attributes->TransferType
+		ISOSyncMask      = 0x3 << 2 // Attributes->IsoSyncType
+		ISOModeMask      = 0x3 << 4 // Attributes->IsoSyncMode
 	)
 	ef := &EndpointFieldsDesc{}
 	err := readDescFields(b, EFSize, ef)
@@ -349,8 +353,14 @@ func NewEndpoint(b []byte) (EndpointDescriptor, error) {
 	}
 	e := EndpointDescriptor{
 		EndpointFieldsDesc: *ef,
-		TransferType:       EndpointType(ef.Attributes & EndpointTypeMask),
+		TransferType:       TransferType(ef.Attributes & EndpointTypeMask),
 	}
+
+	if e.TransferType == EndpointTypeIsochronous {
+		e.ISOSyncType = ISOSyncType(ef.Attributes & ISOSyncMask)
+		e.ISOSyncMode = ISOSyncMode(ef.Attributes & ISOModeMask)
+	}
+
 	if len(b) > EFSize {
 		e.extradata = b[EFSize:]
 	}
@@ -361,18 +371,36 @@ func (e EndpointDescriptor) String() string {
 	return fmt.Sprintf("%s %s (0x%02x), Type: %s. Max Packet: %db. [%s]", e.Descriptor, e.Address, uint8(e.Address), e.TransferType, e.MaxPacketSize, e.extradata)
 }
 
-type EndpointType int
+type TransferType int
 
 const (
-	EndpointTypeControl EndpointType = iota
+	EndpointTypeControl TransferType = iota
 	EndpointTypeIsochronous
 	EndpointTypeBulk
 	EndpointTypeInterrupt
+	EndpointTypeBulkStream
 )
 
-func (et EndpointType) String() string {
-	return []string{"Ctrl", "Isochronous", "Bulk", "Interrupt"}[et]
+func (t TransferType) String() string {
+	return []string{"Ctrl", "Isochronous", "Bulk", "Interrupt", "Bulk Stream"}[t]
 }
+
+type ISOSyncType int
+
+const (
+	ISOSyncTypeNone ISOSyncType = iota
+	ISOSyncTypeAsync
+	ISOSyncTypeAdaptive
+	ISOSyncTypeSync
+)
+
+type ISOSyncMode int
+
+const (
+	ISOUsageData ISOSyncMode = iota
+	ISOUsageFeedback
+	ISOUsageImplicit
+)
 
 type EndpointDirection uint8
 
